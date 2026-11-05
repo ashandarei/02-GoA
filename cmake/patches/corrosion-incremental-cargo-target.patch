@@ -1,0 +1,62 @@
+diff --git a/cmake/Corrosion.cmake b/cmake/Corrosion.cmake
+index bb4c06a..32ba447 100644
+--- a/cmake/Corrosion.cmake
++++ b/cmake/Corrosion.cmake
+@@ -263,6 +263,8 @@ function(_corrosion_copy_byproduct_deferred target_name output_dir_prop_name car
+                             # tested to work with both multiple files and paths with spaces
+                             ${src_file_names}
+                             "${output_dir}"
++                        COMMAND ${CMAKE_COMMAND} -E touch
++                            "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/_cargo-build_${target_name}.util"
+                         BYPRODUCTS ${dst_file_names}
+                         COMMENT "Copying byproducts `${file_names}` to ${output_dir}"
+                         VERBATIM
+@@ -576,6 +578,26 @@ function(_add_cargo_build out_cargo_build_out_dir)
+     endif()
+     get_filename_component(workspace_toml_dir ${path_to_toml} DIRECTORY )
+ 
++    # Custom targets are always dirty, so the original Corrosion integration
++    # invoked Cargo on every native build. Give Ninja concrete source inputs
++    # and create the nominal custom-target output after Cargo succeeds. Extra
++    # roots cover path dependencies that live outside the manifest directory.
++    set(cargo_build_input_roots "${workspace_toml_dir}")
++    list(APPEND cargo_build_input_roots ${CORROSION_ADDITIONAL_BUILD_INPUT_ROOTS})
++    set(cargo_build_inputs)
++    foreach(cargo_build_input_root IN LISTS cargo_build_input_roots)
++        if(IS_DIRECTORY "${cargo_build_input_root}")
++            file(GLOB_RECURSE cargo_build_root_inputs
++                CONFIGURE_DEPENDS
++                LIST_DIRECTORIES FALSE
++                "${cargo_build_input_root}/*.rs"
++                "${cargo_build_input_root}/*.toml"
++                "${cargo_build_input_root}/*.lock")
++            list(APPEND cargo_build_inputs ${cargo_build_root_inputs})
++        endif()
++    endforeach()
++    list(REMOVE_DUPLICATES cargo_build_inputs)
++
+     if (CMAKE_VS_PLATFORM_NAME)
+         set (build_dir "${CMAKE_VS_PLATFORM_NAME}/$<CONFIG>")
+     elseif(COR_IS_MULTI_CONFIG)
+@@ -766,6 +788,11 @@ function(_add_cargo_build out_cargo_build_out_dir)
+                 ${local_rustflags_delimiter}
+                 ${local_rustflags_genex}
+ 
++        COMMAND ${CMAKE_COMMAND} -E touch
++            "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/_cargo-build_${target_name}"
++
++        DEPENDS ${cargo_build_inputs}
++
+         # Note: Adding `build_byproducts` (the byproducts in the cargo target directory) here
+         # causes CMake to fail during the Generate stage, because the target `target_name` was not
+         # found. I don't know why this happens, so we just don't specify byproducts here and
+@@ -793,6 +820,9 @@ function(_add_cargo_build out_cargo_build_out_dir)
+     # Add custom target before actual build that user defined custom commands (e.g. code generators) can
+     # use as a hook to do something before the build. This mainly exists to not expose the `_cargo-build` targets.
+     add_custom_target(cargo-prebuild_${target_name})
++    if(NOT EXISTS "${CMAKE_CURRENT_BINARY_DIR}/cargo-prebuild_${target_name}")
++        file(TOUCH "${CMAKE_CURRENT_BINARY_DIR}/cargo-prebuild_${target_name}")
++    endif()
+     add_dependencies(_cargo-build_${target_name} cargo-prebuild_${target_name})
+     if(NOT TARGET cargo-prebuild)
+         add_custom_target(cargo-prebuild)

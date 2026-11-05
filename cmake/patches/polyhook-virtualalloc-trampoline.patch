@@ -1,0 +1,118 @@
+diff --git a/sources/ADetour.cpp b/sources/ADetour.cpp
+index 6c00c17..91f9c6f 100644
+--- a/sources/ADetour.cpp
++++ b/sources/ADetour.cpp
+@@ -1,4 +1,5 @@
+ #include "polyhook2/Detour/ADetour.hpp"
++#include "polyhook2/PolyHookOsIncludes.hpp"
+ 
+ #include <cmath>
+ 
+@@ -188,7 +189,9 @@ bool Detour::unHook() {
+     ZydisDisassembler::writeEncoding(m_originalInsts, *this);
+ 
+     if (m_trampoline != NULL) {
+-        delete[](uint8_t*) m_trampoline;
++        if (!VirtualFree(reinterpret_cast<void*>(m_trampoline), 0, MEM_RELEASE)) {
++            Log::log("VirtualFree failed while releasing trampoline: " + std::to_string(GetLastError()), ErrorLevel::SEV);
++        }
+         m_trampoline = NULL;
+     }
+ 
+diff --git a/sources/x64Detour.cpp b/sources/x64Detour.cpp
+index a9f81dd..b5fbb2c 100644
+--- a/sources/x64Detour.cpp
++++ b/sources/x64Detour.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "polyhook2/Detour/x64Detour.hpp"
+ #include "polyhook2/MemProtector.hpp"
++#include "polyhook2/PolyHookOsIncludes.hpp"
+ #include "polyhook2/Misc.hpp"
+ 
+ namespace PLH {
+@@ -716,10 +717,23 @@ bool x64Detour::makeTrampoline(insts_t& prologue, insts_t& outJmpTable) {
+     // prol + jmp back to prol + N * jmpEntries + align pad
+     m_trampolineSz = (uint16_t) (prolSz + jmp_size * (1 + neededEntryCount) + alignment_pad_size);
+ 
+-    // allocate new trampoline before deleting old to increase odds of new mem address
+-    auto tmpTrampoline = (uint64_t) new uint8_t[m_trampolineSz];
++    // Give each executable trampoline its own page instead of changing
++    // protection on a block owned by the process heap.
++    auto tmpTrampoline = reinterpret_cast<uint64_t>(VirtualAlloc(
++        nullptr,
++        m_trampolineSz,
++        MEM_RESERVE | MEM_COMMIT,
++        PAGE_READWRITE));
++    if (tmpTrampoline == 0) {
++        Log::log("VirtualAlloc failed while allocating trampoline: " + std::to_string(GetLastError()), ErrorLevel::SEV);
++        return false;
++    }
+     if (m_trampoline != NULL) {
+-        delete[] (uint8_t*) m_trampoline;
++        if (!VirtualFree(reinterpret_cast<void*>(m_trampoline), 0, MEM_RELEASE)) {
++            Log::log("VirtualFree failed while replacing trampoline: " + std::to_string(GetLastError()), ErrorLevel::SEV);
++            VirtualFree(reinterpret_cast<void*>(tmpTrampoline), 0, MEM_RELEASE);
++            return false;
++        }
+     }
+ 
+     m_trampoline = tmpTrampoline;
+@@ -744,6 +757,8 @@ bool x64Detour::makeTrampoline(insts_t& prologue, insts_t& outJmpTable) {
+         const uint64_t resume_address = m_trampoline + inst_offset + instruction.size();
+         auto opt_translation_address = generateTranslationRoutine(instruction, resume_address);
+         if (!opt_translation_address) {
++            VirtualFree(reinterpret_cast<void*>(m_trampoline), 0, MEM_RELEASE);
++            m_trampoline = NULL;
+             return false;
+         }
+ 
+@@ -772,8 +787,6 @@ bool x64Detour::makeTrampoline(insts_t& prologue, insts_t& outJmpTable) {
+         }
+     }
+ 
+-    MemoryProtector prot(m_trampoline, m_trampolineSz, ProtFlag::R | ProtFlag::W | ProtFlag::X, *this, false);
+-
+     // Insert jmp from trampoline -> prologue after overwritten section
+     const uint64_t jmpToProlAddr = m_trampoline + prolSz;
+ 
+@@ -808,6 +821,39 @@ bool x64Detour::makeTrampoline(insts_t& prologue, insts_t& outJmpTable) {
+     const uint64_t jmpTblStart = jmpToProlAddr + getMinJmpSize();
+     outJmpTable = relocateTrampoline(prologue, jmpTblStart, delta, makeJmpFn, instsNeedingReloc, instsNeedingEntry);
+ 
++    DWORD previousProtection = 0;
++    if (!VirtualProtect(
++            reinterpret_cast<void*>(m_trampoline),
++            m_trampolineSz,
++            PAGE_EXECUTE_READ,
++            &previousProtection)) {
++        Log::log("VirtualProtect failed while sealing trampoline: " + std::to_string(GetLastError()), ErrorLevel::SEV);
++        VirtualFree(reinterpret_cast<void*>(m_trampoline), 0, MEM_RELEASE);
++        m_trampoline = NULL;
++        return false;
++    }
++    if (!FlushInstructionCache(
++            GetCurrentProcess(),
++            reinterpret_cast<void*>(m_trampoline),
++            m_trampolineSz)) {
++        Log::log("FlushInstructionCache failed for trampoline: " + std::to_string(GetLastError()), ErrorLevel::SEV);
++        VirtualFree(reinterpret_cast<void*>(m_trampoline), 0, MEM_RELEASE);
++        m_trampoline = NULL;
++        return false;
++    }
++
++    MEMORY_BASIC_INFORMATION memoryInfo{};
++    if (VirtualQuery(
++            reinterpret_cast<void*>(m_trampoline),
++            &memoryInfo,
++            sizeof(memoryInfo)) != sizeof(memoryInfo) ||
++        (memoryInfo.Protect & 0xff) != PAGE_EXECUTE_READ) {
++        Log::log("VirtualQuery failed to verify RX trampoline protection", ErrorLevel::SEV);
++        VirtualFree(reinterpret_cast<void*>(m_trampoline), 0, MEM_RELEASE);
++        m_trampoline = NULL;
++        return false;
++    }
++
+     return true;
+ }
+ 
