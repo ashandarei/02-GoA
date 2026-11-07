@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(ZeroTwoGoA VERSION 2.0.0 LANGUAGES C CXX)
+project(ZeroTwoGoA VERSION 2.0.1 LANGUAGES C CXX)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/write-if-different.cmake")
 
 set(KH3AP_PINNED_UE4SS_REPOSITORY "https://github.com/ashandarei/ue4ss-goa.git")

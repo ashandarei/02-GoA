@@ -1,5 +1,6 @@
 #include "shared/kh02/kh02_memory_signature.h"
 #include "movie_service.h"
+#include "movie_file.h"
 #include "movie_frames.h"
 #include "movie_audio.h"
 #include "shared/kh02/kh02_movie_shared.h"
@@ -66,7 +67,7 @@ namespace kh02
             throw std::runtime_error("movie_stream_commit");
         }
 
-        json prepare_probe(const std::filesystem::path& directory, const std::string& movie, bool initialize_ui,
+        json prepare_probe(const MovieFile& source, const std::string& movie, bool initialize_ui,
                            bool decode, bool streaming = false, bool audible = false,
                            kh02movie::SharedFrames* shared = nullptr)
         {
@@ -121,33 +122,13 @@ namespace kh02
                 verify_movie_signature(image, kh02build::rva(0x345be10), 11,
                                        "36ca5e368f4c2dc26f31779903cb60693cd79e64fa5ea96c30f94dfb5e0c3010");
             }
-            const bool gear =
-                movie == "gear_a.usm" || movie == "gear_b.usm" || movie == "gear_c.usm" || movie == "gear_d.usm";
-            const kh02movie_metadata::Movie* story = nullptr;
-            for (const auto& candidate : kh02movie_metadata::stories)
-            {
-                if (movie == candidate.file)
-                {
-                    story = &candidate;
-                }
-            }
-            if (!gear && !story)
-            {
-                throw std::runtime_error("movie_not_allowlisted");
-            }
+            const bool gear = source.gear;
+            const auto* story = source.story;
             if (story && decode && !streaming)
             {
                 throw std::runtime_error("story_movie_requires_streaming_decoder");
             }
-            const auto file =
-                directory.parent_path().parent_path().parent_path() / L"Content" / L"CriMovie" / L"main" / movie;
-            const auto bytes = std::filesystem::file_size(file);
-            if (bytes < 1000000 || bytes > (gear ? 32000000ULL : 1024ULL * 1024 * 1024) ||
-                story && bytes != story->bytes)
-            {
-                throw std::runtime_error("movie_file_size");
-            }
-            const auto utf8 = file.u8string();
+            const auto utf8 = source.path.u8string();
             const std::string path(reinterpret_cast<const char*>(utf8.data()), utf8.size());
             static bool original_setup_completed = false;
             static uint32_t original_setup_count = 0;
@@ -654,8 +635,11 @@ namespace kh02
                     return;
                 }
             }
+            const std::string movie(kh02control::text(request.movie));
+            const auto root = directory.parent_path().parent_path().parent_path() / L"Content" / L"CriMovie" / L"main";
+            const auto source = resolve_movie_file(root, movie, result["source"]);
             result["probe"] =
-                prepare_probe(directory, std::string(kh02control::text(request.movie)),
+                prepare_probe(source, movie,
                               (request.flags & kh02control::initialize_ui) != 0, action == "decode", action == "stream",
                               (request.flags & kh02control::audible) != 0, shared.get());
             result["status"] = result["probe"].value("prepared", false) ? "prepared" : "not_prepared";

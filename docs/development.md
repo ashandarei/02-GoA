@@ -21,6 +21,25 @@ Both opt-ins are required. Diagnostic mode provides startup loading, inspection,
 
 Rebuild with diagnostics disabled before preparing a player release.
 
+## Movie language lookup
+
+The KH3 host requests localized movies using its selected voice language. For
+each allowlisted story movie, the companion tries that language directory,
+then `en`, then other installed language directories in alphabetical order.
+This includes Steam installations that store movies under `dt`. Neutral
+`movie/` clips and gear previews retain their original paths.
+
+Lookup happens once per movie request. `movie_probe_result.json` records the
+requested movie, attempted candidates and errors, resolved movie directory,
+file size and fallback status, including when decoder preparation later fails.
+Directory names describe the installed layout and do not establish which
+spoken language an encode contains.
+
+The audited basename allowlist and file size bounds apply to every candidate.
+English and neutral clips retain their audited exact sizes. Other localized
+encodes can have different sizes; their decoder/frame validation still applies.
+No match fails playback with the candidate evidence retained.
+
 ## Wine/Proton testing
 
 Build the native tests on Windows using the README instructions, then run `build-tests/02_goa_tests.exe` with the intended Wine/Proton runner in a test prefix. It includes its C/C++ runtime and requires no game files.
