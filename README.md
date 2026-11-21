@@ -4,12 +4,12 @@
 
 Supported KH0.2 installations are the Epic Games Store and Steam versions. You must own and install the games; this project does not include game assets or executables.
 
-Version 2.0 uses asset protocol 3. After the game engine mounts its paks, the
+The companion supports asset protocol 3 and the protocol 4 paired-read extension. After the game engine mounts its paks, the
 companion discovers an immutable index of supported file paths and sizes in
 memory and shares it with its owning KH3 process. It does not read or create
 an asset catalog file. Compatibility edits are calculated by the matching KH3
-runtime when packages are requested. Use both updated DLLs together with
-matching asset protocol support.
+runtime when packages are requested. With both DLLs updated, KH3 can fetch a package header and its
+exports in one request when their combined size is at most 64 KiB.
 
 ## Installation
 

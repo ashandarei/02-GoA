@@ -1,5 +1,6 @@
 #include "shared/kh02/kh02_memory_signature.h"
 #include "asset_reader.h"
+#include "asset_pair_reader.h"
 #include "asset_index_provider.h"
 #include "shared/kh02/kh02_owner_pipe.h"
 #include "asset_service.h"
@@ -144,8 +145,10 @@ namespace kh02
             const auto metadata_started = std::chrono::steady_clock::now();
             const auto& assets = asset_index();
             Response response{magic, 1, GetCurrentProcessId(), 0, 0, request.offset, request.nonce, assets.tag};
-            if (request.magic == magic && request.version == version && request.catalog_tag == assets.tag &&
-                request.file_id == index_file_id && request.length <= max_read && request.length <= destination.size())
+            const bool pair_probe = request.version == paired_version && !request.length && !request.offset;
+            if (request.magic == magic && (request.version == version || pair_probe) &&
+                request.catalog_tag == assets.tag && request.file_id == index_file_id && request.length <= max_read &&
+                request.length <= destination.size())
             {
                 const auto& index = serialized_asset_index();
                 response.file_size = index.size();
@@ -264,7 +267,11 @@ namespace kh02
                             break;
                         }
                         ++requests;
-                        auto response = read_asset(request, payload);
+                        const auto& assets = kh02asset::asset_index();
+                        auto response = request.file_id == kh02asset::pair_file_id
+                                            ? kh02asset::read_asset_pair(request, assets.files, assets.tag,
+                                                                         GetCurrentProcessId(), payload, read_asset)
+                                            : read_asset(request, payload);
                         if (response.status)
                         {
                             ++errors;

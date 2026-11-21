@@ -4,7 +4,7 @@
 #include "shared/kh02/kh02_runtime_mode.h"
 #include "shared/kh02/kh02_control_protocol.h"
 #include "shared/kh02/kh02_startup_gate.h"
-#include "support/kh3ap/features/kh02/transport/kh02_asset_protocol.h"
+#include "probe/asset_pair_reader.h"
 #include <shellapi.h>
 #include <algorithm>
 #include <array>
@@ -174,6 +174,52 @@ namespace
 
     // Uses production OwnerPipe and the unchanged request/reply layouts, with
     // synthetic payloads only. No game, assets, source keys or executable bytes.
+    void test_asset_pairs()
+    {
+        using namespace kh02asset;
+
+        struct File
+        {
+            uint64_t size;
+        };
+
+        const std::array<File, 3> files{{{3}, {5}, {max_pair_read}}};
+        Request request{magic, paired_version, pair_file_id, 8, pair_ids(0, 1), 19, 42};
+        std::array<unsigned char, 8> bytes{};
+        unsigned calls = 0;
+        bool fail_exports = false;
+        auto read = [&](const Request& part, std::span<unsigned char> output)
+        {
+            require(part.version == version && !part.offset && part.length == files.at(part.file_id).size,
+                    "complete single file");
+            ++calls;
+            for (size_t i = 0; i < output.size(); ++i)
+            {
+                output[i] = static_cast<unsigned char>(10 * part.file_id + i);
+            }
+            return Response{magic, fail_exports && part.file_id == 1 ? 3u : 0u, 7, part.length};
+        };
+        auto run = [&] { return read_asset_pair(request, files, 42, 7, bytes, read); };
+        auto reply = run();
+        require(!reply.status && reply.length == 8 && reply.file_size == 8 && reply.nonce == request.nonce &&
+                    reply.offset == request.offset &&
+                    bytes == std::array<unsigned char, 8>{0, 1, 2, 10, 11, 12, 13, 14},
+                "header and export bytes in wire order");
+        fail_exports = true;
+        reply = run();
+        require(reply.status && !reply.length && calls == 4, "no partial reply on second read failure");
+        for (const auto ids : {pair_ids(1, 1), pair_ids(1, 3), pair_ids(0, 2)})
+        {
+            request.offset = ids;
+            require(run().status && calls == 4, "invalid pair rejected before IO");
+        }
+        request.offset = pair_ids(0, 1);
+        request.length = 7;
+        require(run().status && calls == 4, "pair length must match");
+        static_assert(can_pair(1, max_pair_read - 1) && !can_pair(1, max_pair_read));
+        static_assert(!can_pair(0, 1) && !can_pair(UINT64_MAX, 2));
+    }
+
     struct EchoServer
     {
         kh02ipc::OwnerPipe pipe;
@@ -437,6 +483,7 @@ int wmain(int argc, wchar_t** argv)
         check_transport();
         check_owner_exit();
         check_cross_process_owner();
+        test_asset_pairs();
         std::cout << "PASS: SHA-256 guards, diagnostic opt-in, pipe ACL, peer rejection, fragmented/max-size RPC, "
                      "partial timeout, cancellation, owner exit and cross-process ownership\n";
         return 0;
