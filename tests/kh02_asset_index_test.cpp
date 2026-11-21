@@ -32,6 +32,12 @@ int main()
            "/content/localization/game/en/kh02.locres");
     const auto wire = serialize_index(index);
     assert(serialize_index(parse_index(wire, build)) == wire);
+    const auto escaped = build_index({{std::string(source_control_file), 1},
+                                      {prefix + "Test/\"{{{{[[[[[.uasset", 1}},
+                                     build);
+    const auto escaped_wire = serialize_index(escaped);
+    assert(serialize_index(parse_index(escaped_wire, build)) == escaped_wire);
+    rejects([] { check_index_depth("[[[[[[[[[0]]]]]]]]]"); });
     rejects(
         [&]
         {

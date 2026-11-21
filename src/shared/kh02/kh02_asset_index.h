@@ -261,22 +261,50 @@ namespace kh02asset
         return result;
     }
 
+    inline void check_index_depth(std::string_view text)
+    {
+        constexpr std::size_t maximum_depth = 8;
+        std::size_t depth = 0;
+        bool in_string = false;
+        bool escaped = false;
+        for (const char character : text)
+        {
+            if (in_string)
+            {
+                if (character == '"' && !escaped)
+                {
+                    in_string = false;
+                }
+                escaped = character == '\\' && !escaped;
+            }
+            else if (character == '"')
+            {
+                in_string = true;
+            }
+            else if (character == '{' || character == '[')
+            {
+                if (++depth > maximum_depth)
+                {
+                    throw std::runtime_error("kh02_index_depth");
+                }
+            }
+            else if ((character == '}' || character == ']') && depth)
+            {
+                --depth;
+            }
+        }
+    }
+
     inline auto parse_index(std::string_view text, std::string_view expected_build) -> AssetIndex
     {
         if (text.empty() || text.size() > maximum_index_bytes)
         {
             throw std::runtime_error("kh02_index_byte_limit");
         }
-        const auto document =
-            nlohmann::json::parse(text,
-                                  [](int depth, nlohmann::json::parse_event_t, nlohmann::json&)
-                                  {
-                                      if (depth > 8)
-                                      {
-                                          throw std::runtime_error("kh02_index_depth");
-                                      }
-                                      return true;
-                                  });
+        // The DOM callback parser walks the accumulated array after each
+        // object. Bound nesting in a linear pass, then let JSON validate syntax.
+        check_index_depth(text);
+        const auto document = nlohmann::json::parse(text);
         if (!document.is_object() || document.size() != 4 ||
             document.at("schema") != std::string(index_schema) ||
             document.at("source_build") != std::string(expected_build) ||
