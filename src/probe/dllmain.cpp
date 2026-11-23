@@ -69,7 +69,7 @@ class Kh02Probe final : public RC::CppUserModBase
     Kh02Probe()
     {
         ModName = STR("KH02APProbeCpp");
-        ModVersion = STR("2.0.1");
+        ModVersion = STR("2.0.2");
         ModDescription = STR("KH 0.2 Garden of Assemblage companion");
         ModAuthors = STR("aesais");
         wchar_t executable[32768]{};
